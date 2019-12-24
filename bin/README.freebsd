@@ -1,0 +1,11 @@
+FreeBSD users: You can use the binary releases by running:
+
+  ./derasterize.com -h
+
+Assuming your login shell is bash. Otherwise you may need to run:
+
+  /bin/sh ./derasterize.com -h
+
+Just once, and it'll patch itself. This is needed due to restrictions
+that the FreeBSD introduced in their forked version of the Almquist
+Shell, which break compatibility with Sixth Edition shell scripts.

@@ -1,0 +1,5 @@
+Linux users: You can use the binary releases by running:
+
+  ./derasterize.com -h
+
+All distros since 2008 are supported.

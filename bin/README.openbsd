@@ -1,0 +1,9 @@
+OpenBSD users: You can use the binary releases by running:
+
+  ./derasterize.com -h
+
+Please note that some shells, e.g. mksh, you may need to run:
+
+  /bin/sh ./derasterize.com -h
+
+Just once, so the program can patch itself appropriately.

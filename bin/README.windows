@@ -1,0 +1,21 @@
+Windows users: You can use the binary releases by running:
+
+  derasterize.com -h
+
+You need to be running Vista x64 or later. Please note however that
+CMD.EXE only recently reintroduced support for ANSI.SYS style colors
+with Windows 10. Folks on older versions will want to install a
+different command prompt program.
+
+Cygwin/Msys2 users: These are WIN32 binaries. They do not link Red Hat's
+DLLs. As such, *real* filenames need to be passed via arguments and
+environment variables, particularly w/ $PATH.
+
+WSL users: The Windows executive will attempt to run these binaries as
+Windows programs, and then refuse to authorize them to do anything. You
+may need to invoke the binary once via bash so it becomes a Linux prog:
+
+  bash ./derasterize.com -h
+  ./derasterize.com -h
+
+Then it'll work fine.

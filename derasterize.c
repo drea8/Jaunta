@@ -97,8 +97,6 @@ Copyright 2019 Justine Alexandra Roberts Tunney\"");
 #include <termios.h>
 #include <errno.h>
 #include <unistd.h>
-// Can be missing in msys2
-#include <uchar.h>
 
 #define BEST 0
 #define FAST 1
@@ -632,7 +630,7 @@ static const uint32_t kGlyphs[GT] = /* clang-format off */ {
       0,0,0,0),
 } /* clang-format on */;
 
-static const char16_t kRunes[GT] = {
+static const int16_t kRunes[GT] = {
     u' ', /* 0020 empty block [ascii:20,cp437:20] */
     u'█', /* 2588 full block [cp437] */
     u'▄', /* 2584 lower half block [cp437:dc] */
@@ -841,7 +839,7 @@ static void rgb2lin(FLOAT f[CN * BN], const unsigned char u[CN * BN]) {
 ╚────────────────────────────────────────────────────────────────────────────│*/
 
 struct Cell {
-  char16_t rune;
+  int16_t rune;
   unsigned char bg[CN], fg[CN];
 };
 

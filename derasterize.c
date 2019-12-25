@@ -95,6 +95,7 @@ Copyright 2019 Justine Alexandra Roberts Tunney\"");
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <termios.h>
+#include <errno.h>
 #include <unistd.h>
 // Can be missing in msys2
 #include <uchar.h>
@@ -847,7 +848,7 @@ struct Cell {
 /**
  * Serializes ANSI background, foreground, and UNICODE glyph to wire.
  */
-static char *celltoa(char *p, struct Cell cell, struct Cell last) {
+static char *celltoa(char *p, struct Cell cell) {
   *p++ = 033;
   *p++ = '[';
   *p++ = '4';
@@ -950,8 +951,8 @@ static FLOAT adjudicate(unsigned b, unsigned f, unsigned g,
  */
 static struct Cell derasterize(unsigned char block[CN * BN]) {
   struct Cell cell;
-  FLOAT r, best, lb[CN * BN];
   unsigned i, n, b, f, g;
+  FLOAT r, best, lb[CN * BN];
   unsigned char bf[1u << MC][2];
   rgb2lin(lb, block);
   n = combinecolors(bf, block);
@@ -988,16 +989,17 @@ static struct Cell derasterize(unsigned char block[CN * BN]) {
 static char *RenderImage(char *vt, const unsigned char *rgb, unsigned yn,
                          unsigned xn) {
   char *v;
-  struct Cell c1, c2;
   unsigned y, x, i, j, k, w;
   unsigned char block[CN * BN];
   const unsigned char *rows[YS];
   v = vt;
-  c1.rune = 0;
   rgb -= (w = xn * XS * CN);
   for (y = 0; y < yn; ++y) {
     if (y) {
-      while (v > vt && v[-1] == ' ') --v;
+      *v++ = 033;
+      *v++ = '[';
+      *v++ = '0';
+      *v++ = 'm';
       *v++ = '\r';
       *v++ = '\n';
     }
@@ -1013,9 +1015,7 @@ static char *RenderImage(char *vt, const unsigned char *rgb, unsigned yn,
           }
         }
       }
-      c2 = derasterize(block);
-      v = celltoa(v, c2, c1);
-      c1 = c2;
+      v = celltoa(v, derasterize(block));
     }
   }
   return v;
@@ -1029,11 +1029,12 @@ static void PrintImage(void *rgb, unsigned yn, unsigned xn) {
   char *v, *vt;
   vt = valloc(yn * (xn * (32 + (2 + (1 + 3) * 3) * 2 + 1 + 3)) * 1 + 5 + 1);
   v = RenderImage(vt, rgb, yn, xn);
-  *v++ = '\r';
   *v++ = 033;
   *v++ = '[';
   *v++ = '0';
   *v++ = 'm';
+  *v++ = '\r';
+  /* *v++ = '\n'; */
   write(1, vt, v - vt);
   free(vt);
 }
@@ -1066,13 +1067,12 @@ static void ReadAll(int fd, char *p, size_t n) {
   } while (n);
 }
 
-static unsigned char *LoadImageOrDie(char *path, unsigned yn, unsigned xn) {
-  void *rgb;
-  size_t size;
+static void ProcessArgument(const char *path, void *rgb, size_t size, unsigned yn,
+                            unsigned xn) {
   int pid, ws, rw[2];
   char dim[10 + 1 + 10 + 1 + 1];
   sprintf(dim, "%ux%u!", xn * XS, yn * YS);
-  pipe(rw);
+  ORDIE(pipe(rw) != -1);
   if (!(pid = fork())) {
     close(rw[0]);
     dup2(rw[1], STDOUT_FILENO);
@@ -1081,71 +1081,95 @@ static unsigned char *LoadImageOrDie(char *path, unsigned yn, unsigned xn) {
     _exit(EXIT_FAILURE);
   }
   close(rw[1]);
-  ORDIE((rgb = valloc((size = yn * YS * xn * XS * CN))));
   ReadAll(rw[0], rgb, size);
   ORDIE(close(rw[0]) != -1);
   ORDIE(waitpid(pid, &ws, 0) != -1);
   ORDIE(WEXITSTATUS(ws) == 0);
-  return rgb;
+  PrintImage(rgb, yn, xn);
+}
+
+static int FileExists(const char *path) {
+  struct stat st;
+  int olderr = errno;
+  int rc = stat(path, &st);
+  if (rc == -1 && (errno == ENOENT || errno == ENOTDIR)) {
+    errno = olderr;
+  }
+  return rc != -1;
+}
+
+static int ParseNumberOption(const char *arg) {
+  long x;
+  x = strtol(arg, NULL, 0);
+  if (!(1 <= x && x <= INT_MAX)) {
+    fprintf(stderr, "invalid flexidecimal: %s\n\n", arg);
+    exit(EXIT_FAILURE);
+  }
+  return x;
 }
 
 int main(int argc, char *argv[]) {
-  int i, j;
-  char *option, *filename;
+  int i;
   void *rgb;
+  size_t size;
+  char *option;
   unsigned yd, xd;
-  int y=0, x=0;
+  int y = 0, x = 0;
 
-  btoa(0, 0); // FIXME: this is needed. But why?
+  btoa(0, 0); // initialize quick decimal conversion table
 
-  // Must provide at least one filename
-  if (argc < 2) {
-   printf (HELPTEXT);
-   exit (255);
-  }
-
-  // Dirty option parsing without getopt
   for (i = 1; i < argc; ++i) {
-    option= argv[i]; // option=-y12
-    switch( (int) option[0] ) {
-       case '-': // unix style
-       case '/': // dos style
-           option++; // option=y12
-           switch( (int) option[0]) {
-                 case 'x':
-                    x = atoi(++option);
-                    break;
-                 case 'y':
-                    y = atoi(++option);
-                    break;
-                 case 'h':
-                    printf (HELPTEXT);
-                    exit (1);
-                 default:
-                    printf( "Unknown option %c\n\n",  (int) option[0]);
-           } // switch
-       default:
-           filename=option;
-    } // switch
-   } //for i
+    option = argv[i];  // option=-y12
+    switch (option[0]) {
+      case '/':  // dos style
+        if (FileExists(option)) break;
+        /* fallthrough */
+      case '-':    // unix style
+        option++;  // option=y12
+        switch (option[0]) {
+          case 'x':
+            x = ParseNumberOption(++option);
+            break;
+          case 'y':
+            y = ParseNumberOption(++option);
+            break;
+          case 'h':
+            write(STDOUT_FILENO, HELPTEXT, strlen(HELPTEXT));
+            exit(EXIT_SUCCESS);
+          default:
+            fprintf(stderr, "Unknown option: %c%c\n\n", option[-1], option[0]);
+            exit(EXIT_FAILURE);
+        }  // switch
+        argv[i] = NULL;
+        break;
+      default:
+        break;
+    }  // switch
+  }    // for i
 
   // Use termize to default to full screen if no x and y are given
   GetTermSize(&yd, &xd);
+  /* if (isatty(STDOUT_FILENO)) yd -= 1; */
 
   // if sizes are given, 2 cases:
   //  - positive values: use that as the target size
   //  - negative values: add, for ex to offset the command prompt size
   if (y <= 0) {
-        y += yd;
+    y += yd;
   }
   if (x <= 0) {
-        x += xd;
+    x += xd;
   }
 
   // FIXME: on the conversion stage should do 2Y because of halfblocks
   // printf( "filename >%s<\tx >%d<\ty >%d<\n\n", filename, x, y);
-  rgb = LoadImageOrDie(filename, y, x);
-  PrintImage(rgb, y, x);
+  size = y * YS * x * XS * CN;
+  if (!(rgb = malloc(size))) return -1;
+  for (i = 1; i < argc; ++i) {
+    if (!argv[i]) continue;
+    ProcessArgument(argv[i], rgb, size, y, x);
+  }
   free(rgb);
+
   return 0;
 }
